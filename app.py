@@ -72,13 +72,13 @@ def get_llm_response(text):
 def text_to_speech(text):
     tts = gTTS(text=text, lang='en')
     tts.save("response.mp3")
-    st.audio("response.mp3")
+    st.audio("response.mp3", autoplay=True)
     os.remove("response.mp3")
 
 def main():
     st.title("Voice Assistant with OpenAI Whisper and Groq LLM")
 
-    if st.button("Start Listening for 'Hey app'"):
+    if st.button("Start Listening for 'Indica'"):
         while True:
             if listen_for_keyword():
                 st.write("Keyword detected! Starting voice interaction...")
@@ -91,6 +91,7 @@ def main():
                 st.write(f"Context and explanation: {context_response}")
 
                 text_to_speech(context_response)
+                st.write("Listening for 'Indica' again...")
             else:
                 st.write("Keyword not detected. Listening again...")
 
