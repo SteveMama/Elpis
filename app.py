@@ -19,7 +19,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 def listen_for_keyword():
     recognizer = sr.Recognizer()
     with sr.Microphone() as source:
-        st.write("Listening for 'Hey app'...")
+        st.write("Listening for 'Indica'...")
         audio = recognizer.listen(source)
     try:
         text = recognizer.recognize_google(audio).lower()
@@ -55,8 +55,8 @@ def get_llm_response(text):
     data = {
         "model": "llama3-8b-8192",
         "messages": [
-            {"role": "system", "content": "You are a helpful translator for the blind. You will understand what the user is trying to tell and "},
-            {"role": "user", "content": f"for the given text: {text}, you must understand and convert it into simple. and then let the user know what the other person is trying to say. You must only provide the translation and the context. Nothing more"}
+            {"role": "system", "content": "You are a helpful assistant for blind people. You can translate, provide information, and answer questions. Always prioritize clarity and conciseness in your responses."},
+            {"role": "user", "content": f"Respond to this input: '{text}'. If it's in a foreign language, translate it to English. If it's a question or request for information, provide a helpful answer. Keep your response brief and to the point."}
         ],
         "max_tokens": 1000
     }
@@ -76,21 +76,21 @@ def text_to_speech(text):
     os.remove("response.mp3")
 
 def main():
-    st.title("Voice Assistant with OpenAI Whisper and Groq LLM")
+    st.title("Indica: Voice Assistant for the Visually Impaired")
 
     if st.button("Start Listening for 'Indica'"):
         while True:
             if listen_for_keyword():
-                st.write("Keyword detected! Starting voice interaction...")
+                st.write("Keyword detected! How can I assist you?")
                 audio, sample_rate = record_audio()
 
                 transcribed_text, detected_language = transcribe_audio(audio, sample_rate)
-                st.write(f"Transcribed text: {transcribed_text}")
+                st.write(f"You said: {transcribed_text}")
 
-                context_response = get_llm_response(transcribed_text)
-                st.write(f"Context and explanation: {context_response}")
+                response = get_llm_response(transcribed_text)
+                st.write(f"Indica's response: {response}")
 
-                text_to_speech(context_response)
+                text_to_speech(response)
                 st.write("Listening for 'Indica' again...")
             else:
                 st.write("Keyword not detected. Listening again...")
