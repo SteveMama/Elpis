@@ -7,39 +7,35 @@ from gtts import gTTS
 import os
 import json
 from google.cloud import speech
+import whisper
 
 # Set up Groq API key
 GROQ_API_KEY = "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"
 
+whisper_model = whisper.load_model("base", )
+
 
 # Function to record audio
-def record_audio(duration=5, sample_rate=44100):
+def record_audio(duration=5, sample_rate=16000):
     st.write("Recording...")
     audio = sd.rec(int(duration * sample_rate), samplerate=sample_rate, channels=1)
     sd.wait()
     st.write("Recording complete.")
-    return audio, sample_rate
+    return audio.flatten(), sample_rate
 
 
-# Function to transcribe audio using Google Cloud Speech-to-Text
+# Function to transcribe audio using Whisper
 def transcribe_audio(audio, sample_rate):
-    client = speech.SpeechClient()
+    # Save the audio to a temporary file
+    wav.write("temp.wav", sample_rate, audio)
 
-    content = audio.tobytes()
-    audio = speech.RecognitionAudio(content=content)
-    config = speech.RecognitionConfig(
-        encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-        sample_rate_hertz=sample_rate,
-        language_code="en-US",
-    )
+    # Transcribe using Whisper
+    result = whisper_model.transcribe("temp.wav")
 
-    response = client.recognize(config=config, audio=audio)
+    # Remove the temporary file
+    os.remove("temp.wav")
 
-    transcription = ""
-    for result in response.results:
-        transcription += result.alternatives[0].transcript
-
-    return transcription
+    return result["text"]
 
 
 # Function to get LLM response from Groq
@@ -77,7 +73,7 @@ def text_to_speech(text):
 
 # Main Streamlit app
 def main():
-    st.title("Voice Assistant for Blind People (using Groq and Google Cloud)")
+    st.title("Voice Assistant for Blind People (using Groq and Whisper)")
 
     if st.button("Start Voice Interaction") or st.session_state.get("voice_interaction", False):
         st.session_state.voice_interaction = True
