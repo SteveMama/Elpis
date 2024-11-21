@@ -48,11 +48,11 @@ def get_llm_response(text):
         "Content-Type": "application/json"
     }
     data = {
-        "model": "mixtral-8x7b-32768",
+        "model": "llama3-8b-8192",
         "messages": [
             {"role": "system",
              "content": "You are a helpful translator for the blind. "},
-            {"role": "user", "content": f"for the given text: {text}, you must understand and convert it into simple english and let the user know what the other person is trying to say."}
+            {"role": "user", "content": f"for the given text: {text}, you must understand and convert it into simple. and then let the user know what the other person is trying to say. You must only provide the translation and the context. Nothing more"}
         ],
         "max_tokens": 1000
     }
