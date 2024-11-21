@@ -6,16 +6,26 @@ from gtts import gTTS
 import os
 from openai import OpenAI
 from dotenv import load_dotenv
-import os
+import speech_recognition as sr
 
 load_dotenv()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-
 # Initialize OpenAI client
 client = OpenAI(api_key=OPENAI_API_KEY)
+
+def listen_for_keyword():
+    recognizer = sr.Recognizer()
+    with sr.Microphone() as source:
+        st.write("Listening for 'Hey app'...")
+        audio = recognizer.listen(source)
+    try:
+        text = recognizer.recognize_google(audio).lower()
+        return "indica" in text
+    except:
+        return False
 
 def record_audio(duration=5, sample_rate=16000):
     st.write("Recording...")
@@ -24,22 +34,17 @@ def record_audio(duration=5, sample_rate=16000):
     st.write("Recording complete.")
     return audio.flatten(), sample_rate
 
-
 def transcribe_audio(audio, sample_rate):
-    # Save the audio to a temporary file
     temp_file = "temp_audio.wav"
     import scipy.io.wavfile as wav
     wav.write(temp_file, sample_rate, audio)
 
-    # Transcribe using OpenAI's Whisper API
     with open(temp_file, "rb") as audio_file:
-        transcript = client.audio.transcriptions.create(model="whisper-1", file=audio_file,response_format="text" )
+        transcript = client.audio.transcriptions.create(model="whisper-1", file=audio_file, response_format="text")
         print("transcript", str(transcript))
-    # Remove the temporary file
     os.remove(temp_file)
 
-    return transcript, "en"  # Assuming English for simplicity
-
+    return transcript, "en"
 
 def get_llm_response(text):
     url = "https://api.groq.com/openai/v1/chat/completions"
@@ -50,8 +55,7 @@ def get_llm_response(text):
     data = {
         "model": "llama3-8b-8192",
         "messages": [
-            {"role": "system",
-             "content": "You are a helpful translator for the blind. "},
+            {"role": "system", "content": "You are a helpful translator for the blind. You will understand what the user is trying to tell and "},
             {"role": "user", "content": f"for the given text: {text}, you must understand and convert it into simple. and then let the user know what the other person is trying to say. You must only provide the translation and the context. Nothing more"}
         ],
         "max_tokens": 1000
@@ -65,32 +69,30 @@ def get_llm_response(text):
     else:
         return f"Error: {response.status_code}, {response.text}"
 
-
 def text_to_speech(text):
     tts = gTTS(text=text, lang='en')
     tts.save("response.mp3")
     st.audio("response.mp3")
     os.remove("response.mp3")
 
-
 def main():
     st.title("Voice Assistant with OpenAI Whisper and Groq LLM")
 
-    if st.button("Start Voice Interaction") or st.session_state.get("voice_interaction", False):
-        st.session_state.voice_interaction = True
+    if st.button("Start Listening for 'Hey app'"):
+        while True:
+            if listen_for_keyword():
+                st.write("Keyword detected! Starting voice interaction...")
+                audio, sample_rate = record_audio()
 
-        audio, sample_rate = record_audio()
+                transcribed_text, detected_language = transcribe_audio(audio, sample_rate)
+                st.write(f"Transcribed text: {transcribed_text}")
 
-        transcribed_text, detected_language = transcribe_audio(audio, sample_rate)
-        st.write(f"Transcribed text: {transcribed_text}")
+                context_response = get_llm_response(transcribed_text)
+                st.write(f"Context and explanation: {context_response}")
 
-        context_response = get_llm_response(transcribed_text)
-        st.write(f"Context and explanation: {context_response}")
-
-        text_to_speech(context_response)
-
-        st.session_state.voice_interaction = False
-
+                text_to_speech(context_response)
+            else:
+                st.write("Keyword not detected. Listening again...")
 
 if __name__ == "__main__":
     main()
