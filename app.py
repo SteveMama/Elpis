@@ -1,21 +1,22 @@
 import streamlit as st
 import sounddevice as sd
 import numpy as np
-import scipy.io.wavfile as wav
 import httpx
 from gtts import gTTS
 import os
-import json
-from google.cloud import speech
-import whisper
+from openai import OpenAI
+from dotenv import load_dotenv
+import os
 
-# Set up Groq API key
-GROQ_API_KEY = "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"
+load_dotenv()
 
-whisper_model = whisper.load_model("base", )
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 
-# Function to record audio
+# Initialize OpenAI client
+client = OpenAI(api_key=OPENAI_API_KEY)
+
 def record_audio(duration=5, sample_rate=16000):
     st.write("Recording...")
     audio = sd.rec(int(duration * sample_rate), samplerate=sample_rate, channels=1)
@@ -24,21 +25,22 @@ def record_audio(duration=5, sample_rate=16000):
     return audio.flatten(), sample_rate
 
 
-# Function to transcribe audio using Whisper
 def transcribe_audio(audio, sample_rate):
     # Save the audio to a temporary file
-    wav.write("temp.wav", sample_rate, audio)
+    temp_file = "temp_audio.wav"
+    import scipy.io.wavfile as wav
+    wav.write(temp_file, sample_rate, audio)
 
-    # Transcribe using Whisper
-    result = whisper_model.transcribe("temp.wav")
-
+    # Transcribe using OpenAI's Whisper API
+    with open(temp_file, "rb") as audio_file:
+        transcript = client.audio.transcriptions.create(model="whisper-1", file=audio_file,response_format="text" )
+        print("transcript", str(transcript))
     # Remove the temporary file
-    os.remove("temp.wav")
+    os.remove(temp_file)
 
-    return result["text"]
+    return transcript, "en"  # Assuming English for simplicity
 
 
-# Function to get LLM response from Groq
 def get_llm_response(text):
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
@@ -48,8 +50,9 @@ def get_llm_response(text):
     data = {
         "model": "mixtral-8x7b-32768",
         "messages": [
-            {"role": "system", "content": "You are a helpful assistant for blind people."},
-            {"role": "user", "content": text}
+            {"role": "system",
+             "content": "You are a helpful translator for the blind. "},
+            {"role": "user", "content": f"for the given text: {text}, you must understand and convert it into simple english and let the user know what the other person is trying to say."}
         ],
         "max_tokens": 1000
     }
@@ -63,7 +66,6 @@ def get_llm_response(text):
         return f"Error: {response.status_code}, {response.text}"
 
 
-# Function to convert text to speech
 def text_to_speech(text):
     tts = gTTS(text=text, lang='en')
     tts.save("response.mp3")
@@ -71,22 +73,21 @@ def text_to_speech(text):
     os.remove("response.mp3")
 
 
-# Main Streamlit app
 def main():
-    st.title("Voice Assistant for Blind People (using Groq and Whisper)")
+    st.title("Voice Assistant with OpenAI Whisper and Groq LLM")
 
     if st.button("Start Voice Interaction") or st.session_state.get("voice_interaction", False):
         st.session_state.voice_interaction = True
 
         audio, sample_rate = record_audio()
 
-        text = transcribe_audio(audio, sample_rate)
-        st.write(f"You said: {text}")
+        transcribed_text, detected_language = transcribe_audio(audio, sample_rate)
+        st.write(f"Transcribed text: {transcribed_text}")
 
-        response = get_llm_response(text)
-        st.write(f"Assistant's response: {response}")
+        context_response = get_llm_response(transcribed_text)
+        st.write(f"Context and explanation: {context_response}")
 
-        text_to_speech(response)
+        text_to_speech(context_response)
 
         st.session_state.voice_interaction = False
 
