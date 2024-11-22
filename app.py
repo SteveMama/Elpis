@@ -8,15 +8,6 @@ from openai import OpenAI
 from dotenv import load_dotenv
 import speech_recognition as sr
 import time
-import queue
-from pydub import AudioSegment
-from pydub.playback import play
-import threading
-import sys
-import wave
-import json
-import io
-from pathlib import Path
 
 # Load environment variables from .env file
 load_dotenv()
@@ -28,108 +19,24 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 # Initialize OpenAI client for Whisper API
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Initialize session state for maintaining context
-if 'conversation_history' not in st.session_state:
-    st.session_state.conversation_history = []
-
-# Initialize playback queue with priority
-playback_queue = queue.PriorityQueue()
-
-# Event to signal when the application is stopping
-stop_event = threading.Event()
-
-# Pre-generated voice notes and tones
-voice_notes = {
-    "welcome": "welcome_message.mp3",
-    "recording_started": "recording_started.mp3",
-    "recording_ended": "recording_ended.mp3",
-    "listening_for_indica": "listening_for_indica.mp3",
-    "heard_you": "heard_you.mp3",
-    "still_listening": "still_listening.mp3",
-    "didnt_catch": "didnt_catch.mp3",
-    "error_microphone": "error_microphone.mp3",
-}
-
-tones = {
-    "start_recording": "start_recording_tone.mp3",
-    "end_recording": "end_recording_tone.mp3"
-}
-
-def play_audio(file_path):
-    """
-    Plays an audio file using pydub.
-
-    Args:
-        file_path (str): Path to the audio file to be played
-    """
-    try:
-        # Check if the file exists
-        if not Path(file_path).is_file():
-            raise FileNotFoundError(f"Error: The file {file_path} was not found.")
-
-        # Load and play the audio file using pydub
-        audio = AudioSegment.from_file(file_path)
-        play(audio)
-    except FileNotFoundError as e:
-        print(e)
-    except Exception as e:
-        print(f"Error playing audio: {e}")
-
-def play_next_message():
-    if not playback_queue.empty():
-        _, file_path = playback_queue.get()
-        play_audio(file_path)
-        st.session_state['audio_playing'] = True
-        time.sleep(1)  # Ensure playback is finished before proceeding
-        st.session_state['audio_playing'] = False
-        play_next_message()
-
-def speak_message(message_key, priority=1):
-    """
-    Helper function to speak messages and handle audio playback.
-
-    Args:
-        message_key (str): Key of the pre-generated message to be spoken
-        priority (int): Priority level for the playback queue (lower number = higher priority)
-    """
-    playback_queue.put((priority, voice_notes[message_key]))
-    if playback_queue.qsize() == 1:
-        play_next_message()
 
 def listen_for_keyword():
     """
     Continuously listens for the wake word 'Indica' using speech recognition.
-    Allows interruption of ongoing playback.
 
     Returns:
         bool: True if 'indica' is detected in the speech, False otherwise
     """
     recognizer = sr.Recognizer()
+    with sr.Microphone() as source:
+        st.write("Listening for 'Indica'...")
+        audio = recognizer.listen(source)
     try:
-        if st.session_state.get('audio_playing', False):
-            # Stop playback if audio is currently playing
-            st.session_state['audio_playing'] = False
-            return True
-
-        with sr.Microphone() as source:
-            play_audio(voice_notes["listening_for_indica"])
-            recognizer.adjust_for_ambient_noise(source, duration=1)
-            audio = recognizer.listen(source, timeout=10)
-            text = recognizer.recognize_google(audio).lower()
-
-            if "indica" in text:
-                return True
-
-    except sr.WaitTimeoutError:
-        speak_message("still_listening")
+        text = recognizer.recognize_google(audio).lower()
+        return "indica" in text
+    except:
         return False
-    except sr.UnknownValueError:
-        speak_message("didnt_catch")
-        return False
-    except Exception as e:
-        speak_message("error_microphone")
-        print(f"Error: {str(e)}")
-        return False
+
 
 def record_audio(duration=5, sample_rate=16000):
     """
@@ -142,13 +49,12 @@ def record_audio(duration=5, sample_rate=16000):
     Returns:
         tuple: (flattened audio array, sample rate)
     """
-    play_audio(tones["start_recording"])
-    speak_message("recording_started", priority=0)
+    st.write("Recording...")
     audio = sd.rec(int(duration * sample_rate), samplerate=sample_rate, channels=1)
     sd.wait()
-    play_audio(tones["end_recording"])
-    speak_message("recording_ended", priority=0)
+    st.write("Recording complete.")
     return audio.flatten(), sample_rate
+
 
 def transcribe_audio(audio, sample_rate):
     """
@@ -178,11 +84,8 @@ def transcribe_audio(audio, sample_rate):
 
     # Clean up temporary file
     os.remove(temp_file)
-
-    # Add transcription to conversation history
-    st.session_state.conversation_history.append({"role": "user", "content": transcript})
-
     return transcript, "en"
+
 
 def get_llm_response(text):
     """
@@ -201,20 +104,18 @@ def get_llm_response(text):
     }
 
     # Define the conversation context and user prompt
-    messages = st.session_state.conversation_history + [
-        {
-            "role": "system",
-            "content": "You are an AI assistant helping a visually impaired person understand conversations and the world around them. You should translate foreign languages to English, describe situations, and provide context without assuming you're being directly addressed."
-        },
-        {
-            "role": "user",
-            "content": f"The user heard the following: '{text}'. If it's in a foreign language, translate it to English. Then, brief the user as to what was being spoken, as if explaining it to someone who can't see. Don't answer questions directly, just explain what was asked or said."
-        }
-    ]
-
     data = {
         "model": "llama3-8b-8192",
-        "messages": messages,
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are an AI assistant helping a visually impaired person understand conversations and the world around them. You should translate foreign languages to English, describe situations, and provide context without assuming you're being directly addressed. Keep your answer very short and concise. the user is blind"
+            },
+            {
+                "role": "user",
+                "content": f"The user heard the following: '{text}'. If it's in a foreign language, translate it to English. Then, brief the user as to what was being spoken, as if explaining it to someone who can't see. Don't answer questions directly, just explain what was asked or said in less than 15 words."
+            }
+        ],
         "max_tokens": 1000
     }
 
@@ -223,12 +124,57 @@ def get_llm_response(text):
         response = client.post(url, headers=headers, json=data)
 
     if response.status_code == 200:
-        llm_response = response.json()['choices'][0]['message']['content']
-        # Add LLM response to conversation history
-        st.session_state.conversation_history.append({"role": "assistant", "content": llm_response})
-        return llm_response
+        return response.json()['choices'][0]['message']['content']
     else:
         return f"Error: {response.status_code}, {response.text}"
+
+
+def speak_message(message):
+    """
+    Helper function to speak messages and handle audio playback.
+
+    Args:
+        message (str): Message to be spoken
+    """
+    tts = gTTS(text=message, lang='en')
+    tts.save("message.mp3")
+    st.audio("message.mp3", autoplay=True)
+    # Add a small delay to ensure audio completes
+    time.sleep(len(message.split()) * 0.3)
+    os.remove("message.mp3")
+
+
+def listen_for_keyword():
+    """
+    Continuously listens for the wake word 'Indica' using speech recognition.
+
+    Returns:
+        bool: True if 'indica' is detected in the speech, False otherwise
+    """
+    recognizer = sr.Recognizer()
+    try:
+        with sr.Microphone() as source:
+            st.write("Listening for 'Indica'...")
+            audio = recognizer.listen(source, timeout=5, phrase_time_limit=3)
+            text = recognizer.recognize_google(audio).lower()
+            if "indica" in text:
+                return True
+            else:
+                speak_message("I didn't hear Indica. Please say Indica when you need help.")
+                return False
+    except sr.WaitTimeoutError:
+        speak_message("I'm still listening for Indica.")
+        return False
+    except sr.UnknownValueError:
+        speak_message("I didn't catch that. Please say Indica clearly when you need help.")
+        return False
+    except Exception as e:
+        speak_message("There was an error with the microphone. Please try again.")
+        print(f"Error: {str(e)}")
+        return False
+
+
+
 
 def text_to_speech(text):
     """
@@ -238,13 +184,12 @@ def text_to_speech(text):
         text (str): Text to be converted to speech
     """
     tts = gTTS(text=text, lang='en')
-    response_file = "response.mp3"
-    tts.save(response_file)
-    play_audio(response_file)
-    try:
-        os.remove(response_file)
-    except FileNotFoundError:
-        print("Warning: response.mp3 was not found when attempting to delete.")
+    tts.save("response.mp3")
+    st.audio("response.mp3", autoplay=True)
+    # Add delay based on text length
+    time.sleep(len(text.split()) * 0.3)
+    os.remove("response.mp3")
+
 
 def main():
     """
@@ -255,17 +200,18 @@ def main():
     # Initialize session state for first run
     if 'first_run' not in st.session_state:
         st.session_state.first_run = True
-        speak_message("welcome", priority=0)  # High priority welcome message
+        welcome_message = "Hi there, this is Indica, I can help you. For anything you need, say Indica and ask."
+        speak_message(welcome_message)
 
     # Create a placeholder for dynamic content updates
     placeholder = st.empty()
 
     # Main application loop
-    while not stop_event.is_set():
+    while True:
         if listen_for_keyword():
             with placeholder.container():
                 # Process voice input
-                speak_message("heard_you", priority=1)
+                speak_message("I heard you! What can I help you with?")
                 audio, sample_rate = record_audio()
 
                 # Convert speech to text
@@ -278,14 +224,12 @@ def main():
 
                 # Convert response to speech
                 text_to_speech(response)
-                speak_message("listening_for_indica", priority=1)
+                speak_message("I'm listening for Indica again.")
         else:
             with placeholder.container():
                 st.write("Listening for 'Indica'...")
 
+
+
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        stop_event.set()
-        print("Stopping the application...")
+    main()
