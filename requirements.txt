@@ -1,0 +1,8 @@
+streamlit
+sounddevice
+numpy
+httpx
+gtts
+openai
+python-dotenv
+speech_recognition
