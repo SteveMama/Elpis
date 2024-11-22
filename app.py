@@ -8,6 +8,11 @@ from openai import OpenAI
 from dotenv import load_dotenv
 import speech_recognition as sr
 import time
+import queue
+from pydub import AudioSegment
+from pydub.playback import play
+from pydub.generators import Sine
+import threading
 
 # Load environment variables from .env file
 load_dotenv()
@@ -23,21 +28,80 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 if 'conversation_history' not in st.session_state:
     st.session_state.conversation_history = []
 
+# Initialize playback queue
+playback_queue = queue.Queue()
+
+def generate_tone(file_name, frequency=440, duration_ms=500):
+    """
+    Generates a sine wave tone and saves it as an MP3 file.
+
+    Args:
+        file_name (str): Name of the file to save the tone.
+        frequency (int): Frequency of the tone in Hz.
+        duration_ms (int): Duration of the tone in milliseconds.
+    """
+    tone = Sine(frequency).to_audio_segment(duration=duration_ms)
+    tone.export(file_name, format="mp3")
+
+# Generate the tones if they do not exist
+if not os.path.exists("start_recording_tone.mp3"):
+    generate_tone("start_recording_tone.mp3", frequency=500, duration_ms=300)
+
+if not os.path.exists("end_recording_tone.mp3"):
+    generate_tone("end_recording_tone.mp3", frequency=600, duration_ms=300)
+
+def play_next_message():
+    if not playback_queue.empty():
+        message = playback_queue.get()
+        tts = gTTS(text=message, lang='en')
+        tts.save("message.mp3")
+        st.audio("message.mp3", autoplay=True)
+        st.session_state['audio_playing'] = True
+        time.sleep(len(message.split()) * 0.3)
+        os.remove("message.mp3")
+        st.session_state['audio_playing'] = False
+        play_next_message()
+
+def speak_message(message):
+    """
+    Helper function to speak messages and handle audio playback.
+
+    Args:
+        message (str): Message to be spoken
+    """
+    playback_queue.put(message)
+    if playback_queue.qsize() == 1:
+        play_next_message()
+
 def listen_for_keyword():
     """
     Continuously listens for the wake word 'Indica' using speech recognition.
+    Allows interruption of ongoing playback.
 
     Returns:
         bool: True if 'indica' is detected in the speech, False otherwise
     """
     recognizer = sr.Recognizer()
-    with sr.Microphone() as source:
-        st.write("Listening for 'Indica'...")
-        audio = recognizer.listen(source)
     try:
-        text = recognizer.recognize_google(audio).lower()
-        return "indica" in text
-    except:
+        if st.session_state.get('audio_playing', False):
+            # Stop playback if audio is currently playing
+            st.session_state['audio_playing'] = False
+            return True
+
+        with sr.Microphone() as source:
+            st.write("Listening for 'Indica'...")
+            audio = recognizer.listen(source, timeout=5, phrase_time_limit=3)
+            text = recognizer.recognize_google(audio).lower()
+            return "indica" in text
+    except sr.WaitTimeoutError:
+        speak_message("I'm still listening for Indica.")
+        return False
+    except sr.UnknownValueError:
+        speak_message("I didn't catch that. Please say Indica clearly when you need help.")
+        return False
+    except Exception as e:
+        speak_message("There was an error with the microphone. Please try again.")
+        print(f"Error: {str(e)}")
         return False
 
 def record_audio(duration=5, sample_rate=16000):
@@ -52,10 +116,27 @@ def record_audio(duration=5, sample_rate=16000):
         tuple: (flattened audio array, sample rate)
     """
     st.write("Recording...")
+    play_tone("start_recording_tone.mp3")
     audio = sd.rec(int(duration * sample_rate), samplerate=sample_rate, channels=1)
     sd.wait()
+    play_tone("end_recording_tone.mp3")
     st.write("Recording complete.")
     return audio.flatten(), sample_rate
+
+def play_tone(tone_file):
+    """
+    Plays an auditory tone to signal different stages of the interaction.
+
+    Args:
+        tone_file (str): File path of the tone to be played
+    """
+    try:
+        tone = AudioSegment.from_file(tone_file)
+        play(tone)
+    except FileNotFoundError:
+        print(f"Error: The file {tone_file} was not found.")
+    except Exception as e:
+        print(f"Error playing tone: {e}")
 
 def transcribe_audio(audio, sample_rate):
     """
@@ -137,49 +218,6 @@ def get_llm_response(text):
     else:
         return f"Error: {response.status_code}, {response.text}"
 
-def speak_message(message):
-    """
-    Helper function to speak messages and handle audio playback.
-
-    Args:
-        message (str): Message to be spoken
-    """
-    tts = gTTS(text=message, lang='en')
-    tts.save("message.mp3")
-    st.audio("message.mp3", autoplay=True)
-    # Add a small delay to ensure audio completes
-    time.sleep(len(message.split()) * 0.3)
-    os.remove("message.mp3")
-
-def listen_for_keyword():
-    """
-    Continuously listens for the wake word 'Indica' using speech recognition.
-
-    Returns:
-        bool: True if 'indica' is detected in the speech, False otherwise
-    """
-    recognizer = sr.Recognizer()
-    try:
-        with sr.Microphone() as source:
-            st.write("Listening for 'Indica'...")
-            audio = recognizer.listen(source, timeout=5, phrase_time_limit=3)
-            text = recognizer.recognize_google(audio).lower()
-            if "indica" in text:
-                return True
-            else:
-                speak_message("I didn't hear Indica. Please say Indica when you need help.")
-                return False
-    except sr.WaitTimeoutError:
-        speak_message("I'm still listening for Indica.")
-        return False
-    except sr.UnknownValueError:
-        speak_message("I didn't catch that. Please say Indica clearly when you need help.")
-        return False
-    except Exception as e:
-        speak_message("There was an error with the microphone. Please try again.")
-        print(f"Error: {str(e)}")
-        return False
-
 def text_to_speech(text):
     """
     Converts text to speech using Google's Text-to-Speech API.
@@ -187,12 +225,9 @@ def text_to_speech(text):
     Args:
         text (str): Text to be converted to speech
     """
-    tts = gTTS(text=text, lang='en')
-    tts.save("response.mp3")
-    st.audio("response.mp3", autoplay=True)
-    # Add delay based on text length
-    time.sleep(len(text.split()) * 0.3)
-    os.remove("response.mp3")
+    playback_queue.put(text)
+    if playback_queue.qsize() == 1:
+        play_next_message()
 
 def main():
     """
