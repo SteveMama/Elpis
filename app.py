@@ -19,6 +19,9 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 # Initialize OpenAI client for Whisper API
 client = OpenAI(api_key=OPENAI_API_KEY)
 
+# Initialize session state for maintaining context
+if 'conversation_history' not in st.session_state:
+    st.session_state.conversation_history = []
 
 def listen_for_keyword():
     """
@@ -37,7 +40,6 @@ def listen_for_keyword():
     except:
         return False
 
-
 def record_audio(duration=5, sample_rate=16000):
     """
     Records audio input for a specified duration.
@@ -54,7 +56,6 @@ def record_audio(duration=5, sample_rate=16000):
     sd.wait()
     st.write("Recording complete.")
     return audio.flatten(), sample_rate
-
 
 def transcribe_audio(audio, sample_rate):
     """
@@ -84,8 +85,11 @@ def transcribe_audio(audio, sample_rate):
 
     # Clean up temporary file
     os.remove(temp_file)
-    return transcript, "en"
 
+    # Add transcription to conversation history
+    st.session_state.conversation_history.append({"role": "user", "content": transcript})
+
+    return transcript, "en"
 
 def get_llm_response(text):
     """
@@ -104,18 +108,20 @@ def get_llm_response(text):
     }
 
     # Define the conversation context and user prompt
+    messages = st.session_state.conversation_history + [
+        {
+            "role": "system",
+            "content": "You are an AI assistant helping a visually impaired person understand conversations and the world around them. You should translate foreign languages to English, describe situations, and provide context without assuming you're being directly addressed."
+        },
+        {
+            "role": "user",
+            "content": f"The user heard the following: '{text}'. If it's in a foreign language, translate it to English. Then, brief the user as to what was being spoken, as if explaining it to someone who can't see. Don't answer questions directly, just explain what was asked or said."
+        }
+    ]
+
     data = {
         "model": "llama3-8b-8192",
-        "messages": [
-            {
-                "role": "system",
-                "content": "You are an AI assistant helping a visually impaired person understand conversations and the world around them. You should translate foreign languages to English, describe situations, and provide context without assuming you're being directly addressed."
-            },
-            {
-                "role": "user",
-                "content": f"The user heard the following: '{text}'. If it's in a foreign language, translate it to English. Then, brief the user as to what was being spoken, as if explaining it to someone who can't see. Don't answer questions directly, just explain what was asked or said."
-            }
-        ],
+        "messages": messages,
         "max_tokens": 1000
     }
 
@@ -124,10 +130,12 @@ def get_llm_response(text):
         response = client.post(url, headers=headers, json=data)
 
     if response.status_code == 200:
-        return response.json()['choices'][0]['message']['content']
+        llm_response = response.json()['choices'][0]['message']['content']
+        # Add LLM response to conversation history
+        st.session_state.conversation_history.append({"role": "assistant", "content": llm_response})
+        return llm_response
     else:
         return f"Error: {response.status_code}, {response.text}"
-
 
 def speak_message(message):
     """
@@ -142,7 +150,6 @@ def speak_message(message):
     # Add a small delay to ensure audio completes
     time.sleep(len(message.split()) * 0.3)
     os.remove("message.mp3")
-
 
 def listen_for_keyword():
     """
@@ -173,9 +180,6 @@ def listen_for_keyword():
         print(f"Error: {str(e)}")
         return False
 
-
-
-
 def text_to_speech(text):
     """
     Converts text to speech using Google's Text-to-Speech API.
@@ -189,7 +193,6 @@ def text_to_speech(text):
     # Add delay based on text length
     time.sleep(len(text.split()) * 0.3)
     os.remove("response.mp3")
-
 
 def main():
     """
@@ -228,8 +231,6 @@ def main():
         else:
             with placeholder.container():
                 st.write("Listening for 'Indica'...")
-
-
 
 if __name__ == "__main__":
     main()
