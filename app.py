@@ -11,8 +11,11 @@ import time
 import queue
 from pydub import AudioSegment
 from pydub.playback import play
-from pydub.generators import Sine
 import threading
+import sys
+import wave
+import json
+import io
 
 # Load environment variables from .env file
 load_dotenv()
@@ -28,48 +31,62 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 if 'conversation_history' not in st.session_state:
     st.session_state.conversation_history = []
 
-# Initialize playback queue
-playback_queue = queue.Queue()
+# Initialize playback queue with priority
+playback_queue = queue.PriorityQueue()
 
-def generate_tone(file_name, frequency=440, duration_ms=500):
+# Event to signal when the application is stopping
+stop_event = threading.Event()
+
+# Pre-generated voice notes and tones
+voice_notes = {
+    "welcome": "welcome_message.mp3",
+    "recording_started": "recording_started.mp3",
+    "recording_ended": "recording_ended.mp3",
+    "listening_for_indica": "listening_for_indica.mp3",
+    "heard_you": "heard_you.mp3",
+    "still_listening": "still_listening.mp3",
+    "didnt_catch": "didnt_catch.mp3",
+    "error_microphone": "error_microphone.mp3",
+}
+
+tones = {
+    "start_recording": "start_recording_tone.mp3",
+    "end_recording": "end_recording_tone.mp3"
+}
+
+def play_audio(file_path):
     """
-    Generates a sine wave tone and saves it as an MP3 file.
+    Plays an audio file.
 
     Args:
-        file_name (str): Name of the file to save the tone.
-        frequency (int): Frequency of the tone in Hz.
-        duration_ms (int): Duration of the tone in milliseconds.
+        file_path (str): Path to the audio file to be played
     """
-    tone = Sine(frequency).to_audio_segment(duration=duration_ms)
-    tone.export(file_name, format="mp3")
-
-# Generate the tones if they do not exist
-if not os.path.exists("start_recording_tone.mp3"):
-    generate_tone("start_recording_tone.mp3", frequency=500, duration_ms=300)
-
-if not os.path.exists("end_recording_tone.mp3"):
-    generate_tone("end_recording_tone.mp3", frequency=600, duration_ms=300)
+    try:
+        audio = AudioSegment.from_file(file_path)
+        play(audio)
+    except FileNotFoundError:
+        print(f"Error: The file {file_path} was not found.")
+    except Exception as e:
+        print(f"Error playing audio: {e}")
 
 def play_next_message():
     if not playback_queue.empty():
-        message = playback_queue.get()
-        tts = gTTS(text=message, lang='en')
-        tts.save("message.mp3")
-        st.audio("message.mp3", autoplay=True)
+        _, file_path = playback_queue.get()
+        play_audio(file_path)
         st.session_state['audio_playing'] = True
-        time.sleep(len(message.split()) * 0.3)
-        os.remove("message.mp3")
+        time.sleep(1)  # Ensure playback is finished before proceeding
         st.session_state['audio_playing'] = False
         play_next_message()
 
-def speak_message(message):
+def speak_message(message_key, priority=1):
     """
     Helper function to speak messages and handle audio playback.
 
     Args:
-        message (str): Message to be spoken
+        message_key (str): Key of the pre-generated message to be spoken
+        priority (int): Priority level for the playback queue (lower number = higher priority)
     """
-    playback_queue.put(message)
+    playback_queue.put((priority, voice_notes[message_key]))
     if playback_queue.qsize() == 1:
         play_next_message()
 
@@ -89,18 +106,22 @@ def listen_for_keyword():
             return True
 
         with sr.Microphone() as source:
-            st.write("Listening for 'Indica'...")
-            audio = recognizer.listen(source, timeout=5, phrase_time_limit=3)
+            play_audio(voice_notes["listening_for_indica"])
+            recognizer.adjust_for_ambient_noise(source, duration=1)
+            audio = recognizer.listen(source, timeout=10)
             text = recognizer.recognize_google(audio).lower()
-            return "indica" in text
+
+            if "indica" in text:
+                return True
+
     except sr.WaitTimeoutError:
-        speak_message("I'm still listening for Indica.")
+        speak_message("still_listening")
         return False
     except sr.UnknownValueError:
-        speak_message("I didn't catch that. Please say Indica clearly when you need help.")
+        speak_message("didnt_catch")
         return False
     except Exception as e:
-        speak_message("There was an error with the microphone. Please try again.")
+        speak_message("error_microphone")
         print(f"Error: {str(e)}")
         return False
 
@@ -115,28 +136,13 @@ def record_audio(duration=5, sample_rate=16000):
     Returns:
         tuple: (flattened audio array, sample rate)
     """
-    st.write("Recording...")
-    play_tone("start_recording_tone.mp3")
+    play_audio(tones["start_recording"])
+    speak_message("recording_started", priority=0)
     audio = sd.rec(int(duration * sample_rate), samplerate=sample_rate, channels=1)
     sd.wait()
-    play_tone("end_recording_tone.mp3")
-    st.write("Recording complete.")
+    play_audio(tones["end_recording"])
+    speak_message("recording_ended", priority=0)
     return audio.flatten(), sample_rate
-
-def play_tone(tone_file):
-    """
-    Plays an auditory tone to signal different stages of the interaction.
-
-    Args:
-        tone_file (str): File path of the tone to be played
-    """
-    try:
-        tone = AudioSegment.from_file(tone_file)
-        play(tone)
-    except FileNotFoundError:
-        print(f"Error: The file {tone_file} was not found.")
-    except Exception as e:
-        print(f"Error playing tone: {e}")
 
 def transcribe_audio(audio, sample_rate):
     """
@@ -225,9 +231,14 @@ def text_to_speech(text):
     Args:
         text (str): Text to be converted to speech
     """
-    playback_queue.put(text)
-    if playback_queue.qsize() == 1:
-        play_next_message()
+    tts = gTTS(text=text, lang='en')
+    response_file = "response.mp3"
+    tts.save(response_file)
+    play_audio(response_file)
+    try:
+        os.remove(response_file)
+    except FileNotFoundError:
+        print("Warning: response.mp3 was not found when attempting to delete.")
 
 def main():
     """
@@ -238,18 +249,17 @@ def main():
     # Initialize session state for first run
     if 'first_run' not in st.session_state:
         st.session_state.first_run = True
-        welcome_message = "Hi there, this is Indica, I can help you. For anything you need, say Indica and ask."
-        speak_message(welcome_message)
+        speak_message("welcome", priority=0)  # High priority welcome message
 
     # Create a placeholder for dynamic content updates
     placeholder = st.empty()
 
     # Main application loop
-    while True:
+    while not stop_event.is_set():
         if listen_for_keyword():
             with placeholder.container():
                 # Process voice input
-                speak_message("I heard you! What can I help you with?")
+                speak_message("heard_you", priority=1)
                 audio, sample_rate = record_audio()
 
                 # Convert speech to text
@@ -262,10 +272,14 @@ def main():
 
                 # Convert response to speech
                 text_to_speech(response)
-                speak_message("I'm listening for Indica again.")
+                speak_message("listening_for_indica", priority=1)
         else:
             with placeholder.container():
                 st.write("Listening for 'Indica'...")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        stop_event.set()
+        print("Stopping the application...")
