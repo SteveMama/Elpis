@@ -16,6 +16,7 @@ import sys
 import wave
 import json
 import io
+from pathlib import Path
 
 # Load environment variables from .env file
 load_dotenv()
@@ -56,16 +57,21 @@ tones = {
 
 def play_audio(file_path):
     """
-    Plays an audio file.
+    Plays an audio file using pydub.
 
     Args:
         file_path (str): Path to the audio file to be played
     """
     try:
+        # Check if the file exists
+        if not Path(file_path).is_file():
+            raise FileNotFoundError(f"Error: The file {file_path} was not found.")
+
+        # Load and play the audio file using pydub
         audio = AudioSegment.from_file(file_path)
         play(audio)
-    except FileNotFoundError:
-        print(f"Error: The file {file_path} was not found.")
+    except FileNotFoundError as e:
+        print(e)
     except Exception as e:
         print(f"Error playing audio: {e}")
 
