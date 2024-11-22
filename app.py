@@ -7,6 +7,7 @@ import os
 from openai import OpenAI
 from dotenv import load_dotenv
 import speech_recognition as sr
+import time
 
 # Load environment variables from .env file
 load_dotenv()
@@ -128,6 +129,53 @@ def get_llm_response(text):
         return f"Error: {response.status_code}, {response.text}"
 
 
+def speak_message(message):
+    """
+    Helper function to speak messages and handle audio playback.
+
+    Args:
+        message (str): Message to be spoken
+    """
+    tts = gTTS(text=message, lang='en')
+    tts.save("message.mp3")
+    st.audio("message.mp3", autoplay=True)
+    # Add a small delay to ensure audio completes
+    time.sleep(len(message.split()) * 0.3)
+    os.remove("message.mp3")
+
+
+def listen_for_keyword():
+    """
+    Continuously listens for the wake word 'Indica' using speech recognition.
+
+    Returns:
+        bool: True if 'indica' is detected in the speech, False otherwise
+    """
+    recognizer = sr.Recognizer()
+    try:
+        with sr.Microphone() as source:
+            st.write("Listening for 'Indica'...")
+            audio = recognizer.listen(source, timeout=5, phrase_time_limit=3)
+            text = recognizer.recognize_google(audio).lower()
+            if "indica" in text:
+                return True
+            else:
+                speak_message("I didn't hear Indica. Please say Indica when you need help.")
+                return False
+    except sr.WaitTimeoutError:
+        speak_message("I'm still listening for Indica.")
+        return False
+    except sr.UnknownValueError:
+        speak_message("I didn't catch that. Please say Indica clearly when you need help.")
+        return False
+    except Exception as e:
+        speak_message("There was an error with the microphone. Please try again.")
+        print(f"Error: {str(e)}")
+        return False
+
+
+
+
 def text_to_speech(text):
     """
     Converts text to speech using Google's Text-to-Speech API.
@@ -138,6 +186,8 @@ def text_to_speech(text):
     tts = gTTS(text=text, lang='en')
     tts.save("response.mp3")
     st.audio("response.mp3", autoplay=True)
+    # Add delay based on text length
+    time.sleep(len(text.split()) * 0.3)
     os.remove("response.mp3")
 
 
@@ -150,7 +200,8 @@ def main():
     # Initialize session state for first run
     if 'first_run' not in st.session_state:
         st.session_state.first_run = True
-        text_to_speech("Indica is now active and listening. Say 'Indica' to start.")
+        welcome_message = "Hi there, this is Indica, I can help you. For anything you need, say Indica and ask."
+        speak_message(welcome_message)
 
     # Create a placeholder for dynamic content updates
     placeholder = st.empty()
@@ -160,7 +211,7 @@ def main():
         if listen_for_keyword():
             with placeholder.container():
                 # Process voice input
-                st.write("Keyword detected! Listening to the conversation...")
+                speak_message("I heard you! What can I help you with?")
                 audio, sample_rate = record_audio()
 
                 # Convert speech to text
@@ -173,10 +224,11 @@ def main():
 
                 # Convert response to speech
                 text_to_speech(response)
-                st.write("Listening for 'Indica' again...")
+                speak_message("I'm listening for Indica again.")
         else:
             with placeholder.container():
                 st.write("Listening for 'Indica'...")
+
 
 
 if __name__ == "__main__":
