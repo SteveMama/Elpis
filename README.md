@@ -1,4 +1,4 @@
-# Indica: Voice Assistant Documentation
+# Indica: Voice Assistant for the Visually Imparied
 A voice-activated assistant designed to help visually impaired users understand conversations and their surroundings through real-time translation and context interpretation.
 
 ## Technical Overview
