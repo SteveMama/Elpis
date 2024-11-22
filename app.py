@@ -12,6 +12,7 @@ import queue
 from pydub import AudioSegment
 from pydub.playback import play
 from pydub.generators import Sine
+import threading
 
 # Load environment variables from .env file
 load_dotenv()
@@ -26,14 +27,9 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 # Initialize session state for maintaining context
 if 'conversation_history' not in st.session_state:
     st.session_state.conversation_history = []
-if 'listening' not in st.session_state:
-    st.session_state.listening = False
-if 'audio_playing' not in st.session_state:
-    st.session_state.audio_playing = False
 
 # Initialize playback queue
 playback_queue = queue.Queue()
-
 
 def generate_tone(file_name, frequency=440, duration_ms=500):
     """
@@ -47,7 +43,6 @@ def generate_tone(file_name, frequency=440, duration_ms=500):
     tone = Sine(frequency).to_audio_segment(duration=duration_ms)
     tone.export(file_name, format="mp3")
 
-
 # Generate the tones if they do not exist
 if not os.path.exists("start_recording_tone.mp3"):
     generate_tone("start_recording_tone.mp3", frequency=500, duration_ms=300)
@@ -55,19 +50,17 @@ if not os.path.exists("start_recording_tone.mp3"):
 if not os.path.exists("end_recording_tone.mp3"):
     generate_tone("end_recording_tone.mp3", frequency=600, duration_ms=300)
 
-
 def play_next_message():
     if not playback_queue.empty():
         message = playback_queue.get()
         tts = gTTS(text=message, lang='en')
         tts.save("message.mp3")
-        st.session_state.audio_playing = True
         st.audio("message.mp3", autoplay=True)
+        st.session_state['audio_playing'] = True
         time.sleep(len(message.split()) * 0.3)
         os.remove("message.mp3")
-        st.session_state.audio_playing = False
+        st.session_state['audio_playing'] = False
         play_next_message()
-
 
 def speak_message(message):
     """
@@ -80,16 +73,21 @@ def speak_message(message):
     if playback_queue.qsize() == 1:
         play_next_message()
 
-
 def listen_for_keyword():
     """
-    Listens for the wake word 'Indica' using speech recognition.
+    Continuously listens for the wake word 'Indica' using speech recognition.
+    Allows interruption of ongoing playback.
 
     Returns:
         bool: True if 'indica' is detected in the speech, False otherwise
     """
     recognizer = sr.Recognizer()
     try:
+        if st.session_state.get('audio_playing', False):
+            # Stop playback if audio is currently playing
+            st.session_state['audio_playing'] = False
+            return True
+
         with sr.Microphone() as source:
             st.write("Listening for 'Indica'...")
             audio = recognizer.listen(source, timeout=5, phrase_time_limit=3)
@@ -105,7 +103,6 @@ def listen_for_keyword():
         speak_message("There was an error with the microphone. Please try again.")
         print(f"Error: {str(e)}")
         return False
-
 
 def record_audio(duration=5, sample_rate=16000):
     """
@@ -126,7 +123,6 @@ def record_audio(duration=5, sample_rate=16000):
     st.write("Recording complete.")
     return audio.flatten(), sample_rate
 
-
 def play_tone(tone_file):
     """
     Plays an auditory tone to signal different stages of the interaction.
@@ -142,7 +138,6 @@ def play_tone(tone_file):
     except Exception as e:
         print(f"Error playing tone: {e}")
 
-
 def transcribe_audio(audio, sample_rate):
     """
     Transcribes audio to text using OpenAI's Whisper API.
@@ -152,7 +147,7 @@ def transcribe_audio(audio, sample_rate):
         sample_rate (int): Audio sample rate
 
     Returns:
-        str: Transcribed text
+        tuple: (transcribed text, language code)
     """
     temp_file = "temp_audio.wav"
     import scipy.io.wavfile as wav
@@ -167,12 +162,15 @@ def transcribe_audio(audio, sample_rate):
             file=audio_file,
             response_format="text"
         )
-        os.remove(temp_file)
+        print("transcript", str(transcript))
 
-    transcript_text = str(transcript)
-    st.session_state.conversation_history.append({"role": "user", "content": transcript_text})
-    return transcript_text
+    # Clean up temporary file
+    os.remove(temp_file)
 
+    # Add transcription to conversation history
+    st.session_state.conversation_history.append({"role": "user", "content": transcript})
+
+    return transcript, "en"
 
 def get_llm_response(text):
     """
@@ -190,6 +188,7 @@ def get_llm_response(text):
         "Content-Type": "application/json"
     }
 
+    # Define the conversation context and user prompt
     messages = st.session_state.conversation_history + [
         {
             "role": "system",
@@ -197,7 +196,7 @@ def get_llm_response(text):
         },
         {
             "role": "user",
-            "content": f"The user heard the following: '{text}'. If it's in a foreign language, translate it to English. Then, brief the user as to what was being spoken, as if explaining it to someone who can't see."
+            "content": f"The user heard the following: '{text}'. If it's in a foreign language, translate it to English. Then, brief the user as to what was being spoken, as if explaining it to someone who can't see. Don't answer questions directly, just explain what was asked or said."
         }
     ]
 
@@ -207,16 +206,17 @@ def get_llm_response(text):
         "max_tokens": 1000
     }
 
+    # Make API request to Groq
     with httpx.Client() as client:
         response = client.post(url, headers=headers, json=data)
 
     if response.status_code == 200:
         llm_response = response.json()['choices'][0]['message']['content']
+        # Add LLM response to conversation history
         st.session_state.conversation_history.append({"role": "assistant", "content": llm_response})
         return llm_response
     else:
         return f"Error: {response.status_code}, {response.text}"
-
 
 def text_to_speech(text):
     """
@@ -229,36 +229,43 @@ def text_to_speech(text):
     if playback_queue.qsize() == 1:
         play_next_message()
 
-
 def main():
     """
     Main function that runs the Streamlit interface and manages the application flow.
     """
     st.title("Indica: Voice Assistant for the Visually Impaired")
 
-    # Start listening for wake word only if not currently processing
-    if st.button("Start Listening"):
-        st.session_state.listening = True
+    # Initialize session state for first run
+    if 'first_run' not in st.session_state:
+        st.session_state.first_run = True
+        welcome_message = "Hi there, this is Indica, I can help you. For anything you need, say Indica and ask."
+        speak_message(welcome_message)
 
-    if st.session_state.listening:
+    # Create a placeholder for dynamic content updates
+    placeholder = st.empty()
+
+    # Main application loop
+    while True:
         if listen_for_keyword():
-            st.session_state.listening = False
-            speak_message("I heard you! What can I help you with?")
-            audio, sample_rate = record_audio()
+            with placeholder.container():
+                # Process voice input
+                speak_message("I heard you! What can I help you with?")
+                audio, sample_rate = record_audio()
 
-            # Convert speech to text
-            transcribed_text = transcribe_audio(audio, sample_rate)
-            st.write(f"Heard: {transcribed_text}")
+                # Convert speech to text
+                transcribed_text, detected_language = transcribe_audio(audio, sample_rate)
+                st.write(f"Heard: {transcribed_text}")
 
-            # Get AI response
-            response = get_llm_response(transcribed_text)
-            st.write(f"Indica's explanation: {response}")
+                # Get AI response
+                response = get_llm_response(transcribed_text)
+                st.write(f"Indica's explanation: {response}")
 
-            # Convert response to speech
-            text_to_speech(response)
-            speak_message("I'm listening for Indica again.")
-            st.session_state.listening = True
-
+                # Convert response to speech
+                text_to_speech(response)
+                speak_message("I'm listening for Indica again.")
+        else:
+            with placeholder.container():
+                st.write("Listening for 'Indica'...")
 
 if __name__ == "__main__":
     main()
