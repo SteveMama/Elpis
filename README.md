@@ -1,5 +1,44 @@
-# Indica: Voice Assistant for the Visually Imparied
+# Indica: Voice Assistant for the Visually Impaired
 A voice-activated assistant designed to help visually impaired users understand conversations and their surroundings through real-time translation and context interpretation.
+
+
+# important Notes:
+- The write defining my choices and the justificaiton is in the ```Justification.pdf``` document
+- The demo of the application is in the file ```indica-application-demo.mov```
+- The mockup for the application are in the folder ```mockup```
+
+## How to Use the Repository and Start the Application
+
+### Step 1: Clone the Repository
+To get started, clone this repository to your local machine:
+```bash
+git clone https://github.com/SteveMama/Indica.git
+```
+
+### Step 2: Install Dependencies
+Navigate to the project root and install all required dependencies using the `requirements.txt` file:
+```bash
+pip install -r requirements.txt
+```
+
+### Step 3: Configure Environment Variables
+Create a `.env` file in the project root directory and add your API keys for Groq and OpenAI. Here is an example of what your `.env` file should look like:
+```
+GROQ_API_KEY=your_groq_api_key
+OPENAI_API_KEY=your_openai_api_key
+```
+These API keys are necessary for connecting to Groq's LLM and OpenAI's Whisper API.
+
+### Step 4: Run the Application
+Once you have the dependencies installed and the `.env` file configured, start the application by running:
+```bash
+streamlit run app.py
+```
+This will launch the Streamlit web interface, where the assistant will be available.
+
+### Step 5: Using the Application
+- Ensure your microphone is working properly as the application relies heavily on audio input.
+- The assistant will start listening for the wake word "Indica". Once detected, you can interact with it using voice commands.
 
 ## Technical Overview
 

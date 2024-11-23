@@ -6,6 +6,7 @@
   <component name="ChangeListManager">
     <list default="true" id="7a75c925-1d63-424a-abe1-3f85ee7b2a11" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -44,6 +45,11 @@
     "vue.rearranger.settings.migration": "true"
   }
 }]]></component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$" />
+    </key>
+  </component>
   <component name="RunManager">
     <configuration name="app" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="elpis" />
@@ -91,7 +97,7 @@
       <option name="presentableId" value="Default" />
       <updated>1732223787555</updated>
       <workItem from="1732223788693" duration="16505000" />
-      <workItem from="1732312088541" duration="7820000" />
+      <workItem from="1732312088541" duration="8138000" />
     </task>
     <task id="LOCAL-00001" summary="---">
       <option name="closed" value="true" />
